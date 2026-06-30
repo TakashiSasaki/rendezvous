@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(existingData) { return isSignedIn() && existingData.ownerUid == request.auth.uid; }
+    
+    match /rendezvousPoints/{id} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if (
+        (isSignedIn() && resource.data.ownerUid == null && request.resource.data.ownerUid == request.auth.uid) ||
+        isOwner(resource.data) ||
+        (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)))
+      );
+      allow delete: if isOwner(resource.data) || (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+  }
+}

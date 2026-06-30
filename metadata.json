@@ -1,0 +1,6 @@
+{
+  "name": "Rendezvous Point",
+  "description": "A rendezvous point system for claiming and resolving ownership via Google authenticated users.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
