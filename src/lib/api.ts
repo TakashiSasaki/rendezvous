@@ -1,42 +1,76 @@
 import { auth, db } from '../firebase';
-import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { 
+  collection, doc, getDoc, setDoc, updateDoc, deleteDoc, 
+  query, where, getDocs, addDoc, runTransaction, 
+  serverTimestamp, deleteField, limit 
+} from 'firebase/firestore';
+
+async function getEmailHash(email: string) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(email.toLowerCase() + "rendezvous_salt_91238");
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function getManagementDocRef(handle: string) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Not authenticated');
+  const q = query(
+    collection(db, 'rendezvousPoints'), 
+    where('ownerUid', '==', user.uid), 
+    where('managementHandle', '==', handle), 
+    limit(1)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) throw new Error('Not found or no permission');
+  return snap.docs[0];
+}
 
 export const api = {
   createRendezvous: async () => {
-    const ref = doc(collection(db, 'rendezvousPoints'));
-    await setDoc(ref, {
-      createdAt: new Date().toISOString(),
+    const ttlDeleteAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const docRef = await addDoc(collection(db, 'rendezvousPoints'), {
+      state: 'UNCLAIMED',
+      createdAt: serverTimestamp(),
+      ttlDeleteAt,
+      ownerEmailHash: null,
       ownerUid: null,
       managementHandle: null,
+      managementIndex: 0,
       publicJson: null,
-      redirectUrl: null,
-      redirectStatusCode: 302,
-      disabled: false,
+      publicJsonUpdatedAt: null,
+      redirect: null
     });
-    const origin = window.location.origin;
-    return { rendezvousId: ref.id, rendezvousUrl: `${origin}/r/${ref.id}` };
+    return {
+      rendezvousId: docRef.id,
+      rendezvousUrl: `${window.location.origin}/r/${docRef.id}`
+    };
   },
   
   claimRendezvous: async (id: string) => {
     const user = auth.currentUser;
-    if (!user) throw new Error('Not logged in');
-    const handle = 'mgmt_' + Math.random().toString(36).substring(2, 15);
-    const ref = doc(db, 'rendezvousPoints', id);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new Error('Not found');
-    if (snap.data().ownerUid) throw new Error('Already claimed');
+    if (!user) throw new Error('Not authenticated');
     
-    await updateDoc(ref, {
-      ownerUid: user.uid,
-      claimedAt: new Date().toISOString(),
-      managementHandle: handle,
+    return await runTransaction(db, async (t) => {
+      const ref = doc(db, 'rendezvousPoints', id);
+      const docSnap = await t.get(ref);
+      if (!docSnap.exists()) throw new Error('Not found');
+      const data = docSnap.data();
+      if (data.state !== 'UNCLAIMED') throw new Error('Already claimed');
+      
+      const newHandle = 'mgmt_' + crypto.randomUUID().replace(/-/g, '');
+      t.update(ref, {
+        state: 'ACTIVE',
+        ownerEmailHash: await getEmailHash(user.email!),
+        ownerUid: user.uid,
+        managementHandle: newHandle,
+        managementIndex: 1,
+        claimedAt: serverTimestamp(),
+        ttlDeleteAt: deleteField()
+      });
+      return { managementUrl: `${window.location.origin}/m/${newHandle}` };
     });
-    
-    return {
-      rendezvousId: id,
-      managementHandle: handle,
-      managementUrl: `/m/${handle}`
-    };
   },
   
   getRendezvousPublic: async (id: string) => {
@@ -44,86 +78,101 @@ export const api = {
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new Error('Not found');
     const data = snap.data();
-    if (data.disabled) throw new Error('Disabled');
-    return data;
+    
+    const rendezvousObj: any = {
+      id: snap.id,
+      state: data.state
+    };
+    if (data.redirect) rendezvousObj.redirect = data.redirect;
+    
+    const response: any = { _rendezvous: rendezvousObj };
+    if (data.state === 'ACTIVE' && data.publicJson) {
+      Object.assign(response, data.publicJson);
+    }
+    return response;
   },
   
   getMyRendezvous: async () => {
     const user = auth.currentUser;
-    if (!user) throw new Error('Not logged in');
+    if (!user) return { items: [] };
     const q = query(collection(db, 'rendezvousPoints'), where('ownerUid', '==', user.uid));
     const snap = await getDocs(q);
-    return { items: snap.docs.map(d => ({ id: d.id, ...d.data() })) };
+    const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return { items };
   },
   
-  rotateManagementUrl: async (id: string) => {
-    const handle = 'mgmt_' + Math.random().toString(36).substring(2, 15);
-    await updateDoc(doc(db, 'rendezvousPoints', id), {
-      managementHandle: handle
+  rotateManagementUrl: async (handle: string) => {
+    const docSnap = await getManagementDocRef(handle);
+    const newHandle = 'mgmt_' + crypto.randomUUID().replace(/-/g, '');
+    await updateDoc(docSnap.ref, {
+      managementHandle: newHandle,
+      managementIndex: (docSnap.data().managementIndex || 1) + 1
     });
-    return { managementHandle: handle, managementUrl: `/m/${handle}` };
+    return { newManagementUrl: `${window.location.origin}/m/${newHandle}` };
   },
   
   getManagementData: async (handle: string) => {
-    const user = auth.currentUser;
-    if (!user) throw new Error('Not logged in');
-    const q = query(collection(db, 'rendezvousPoints'), where('managementHandle', '==', handle));
-    const snap = await getDocs(q);
-    if (snap.empty) throw new Error('Not found');
-    const docData = snap.docs[0].data() as any;
-    if (docData.ownerUid !== user.uid) throw new Error('Forbidden');
-    return { rendezvousId: snap.docs[0].id, ...docData };
+    const docSnap = await getManagementDocRef(handle);
+    return { rendezvousId: docSnap.id, ...docSnap.data() } as any;
   },
   
   updateRedirect: async (handle: string, url: string, statusCode: number) => {
-    const data = await api.getManagementData(handle);
-    await updateDoc(doc(db, 'rendezvousPoints', data.rendezvousId), {
-      redirectUrl: url,
-      redirectStatusCode: statusCode
+    const docSnap = await getManagementDocRef(handle);
+    await updateDoc(docSnap.ref, {
+      redirect: { url, statusCode }
     });
+    return { success: true };
   },
   
   deleteRedirect: async (handle: string) => {
-    const data = await api.getManagementData(handle);
-    await updateDoc(doc(db, 'rendezvousPoints', data.rendezvousId), {
-      redirectUrl: null,
-      redirectStatusCode: 302
+    const docSnap = await getManagementDocRef(handle);
+    await updateDoc(docSnap.ref, {
+      redirect: deleteField()
     });
+    return { success: true };
   },
   
   updateJson: async (handle: string, publicJson: any) => {
-    const data = await api.getManagementData(handle);
-    await updateDoc(doc(db, 'rendezvousPoints', data.rendezvousId), {
+    const docSnap = await getManagementDocRef(handle);
+    await updateDoc(docSnap.ref, {
       publicJson
     });
+    return { success: true };
   },
   
   deleteJson: async (handle: string) => {
-    const data = await api.getManagementData(handle);
-    await updateDoc(doc(db, 'rendezvousPoints', data.rendezvousId), {
-      publicJson: null
+    const docSnap = await getManagementDocRef(handle);
+    await updateDoc(docSnap.ref, {
+      publicJson: deleteField()
     });
+    return { success: true };
   },
   
   releaseOwner: async (handle: string) => {
-    const data = await api.getManagementData(handle);
-    await updateDoc(doc(db, 'rendezvousPoints', data.rendezvousId), {
-      ownerUid: null,
-      managementHandle: null
+    const docSnap = await getManagementDocRef(handle);
+    await updateDoc(docSnap.ref, {
+      state: 'UNCLAIMED',
+      ownerUid: deleteField(),
+      ownerEmailHash: deleteField(),
+      managementHandle: deleteField(),
+      managementIndex: deleteField(),
+      redirect: deleteField(),
+      publicJson: deleteField(),
+      ttlDeleteAt: serverTimestamp() // just as a cleanup marker
     });
+    return { success: true };
   },
   
   disable: async (handle: string) => {
-    const data = await api.getManagementData(handle);
-    await updateDoc(doc(db, 'rendezvousPoints', data.rendezvousId), {
-      disabled: true
-    });
+    const docSnap = await getManagementDocRef(handle);
+    await updateDoc(docSnap.ref, { state: 'DISABLED' });
+    return { success: true };
   },
   
   enable: async (handle: string) => {
-    const data = await api.getManagementData(handle);
-    await updateDoc(doc(db, 'rendezvousPoints', data.rendezvousId), {
-      disabled: false
-    });
+    const docSnap = await getManagementDocRef(handle);
+    await updateDoc(docSnap.ref, { state: 'ACTIVE' });
+    return { success: true };
   }
 };
+

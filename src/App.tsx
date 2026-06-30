@@ -47,8 +47,8 @@ export default function App() {
   return (
     <div className="flex flex-col min-h-screen">
       <div className="bg-white p-3 text-sm flex items-center justify-between border-b border-gray-200 sticky top-0 z-50 shadow-sm">
-        <div className="flex items-center gap-2 overflow-hidden">
-          <span className="text-gray-400 select-none">Path:</span>
+        <div className="flex items-center gap-2 min-w-0 mr-4">
+          <span className="text-gray-400 select-none shrink-0 hidden sm:inline">Path:</span>
           <span className="font-mono text-gray-700 truncate">{path}</span>
         </div>
         <div className="flex items-center gap-3">
