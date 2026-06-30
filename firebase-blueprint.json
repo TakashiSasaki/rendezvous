@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "RendezvousPoint": {
+      "title": "RendezvousPoint",
+      "description": "A claimable endpoint that can store static or dynamic JSON data and handle custom redirects.",
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["UNCLAIMED", "ACTIVE", "DISABLED"],
+          "description": "The current claim state of this rendezvous point"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the rendezvous point was created"
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "The UID of the user who claimed this point"
+        },
+        "ownerEmailHash": {
+          "type": "string",
+          "description": "SHA-256 hash of the owner's email address"
+        },
+        "managementHandle": {
+          "type": "string",
+          "description": "A secure random identifier used to manage this point without revealing its public ID directly"
+        },
+        "managementIndex": {
+          "type": "integer",
+          "description": "Counter incremented whenever management URL is rotated"
+        },
+        "claimedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the rendezvous point was claimed"
+        },
+        "ttlDeleteAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional TTL deletion timestamp for unclaimed points"
+        },
+        "publicJson": {
+          "type": "object",
+          "description": "Optional arbitrary JSON content exposed at the public URL of the point"
+        },
+        "redirect": {
+          "type": "object",
+          "description": "Optional custom redirect configuration"
+        }
+      },
+      "required": ["state", "createdAt"]
+    },
+    "SystemAdmins": {
+      "title": "SystemAdmins",
+      "description": "Document holding the system administrator configuration.",
+      "type": "object",
+      "properties": {
+        "uids": {
+          "type": "array",
+          "description": "List of system administrator user UIDs",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["uids"]
+    }
+  },
+  "firestore": {
+    "/rendezvousPoints/{id}": {
+      "schema": "RendezvousPoint",
+      "description": "Stores individual rendezvous points"
+    },
+    "/system/admins": {
+      "schema": "SystemAdmins",
+      "description": "Stores system configuration, specifically lists of administrator UIDs"
+    }
+  }
+}

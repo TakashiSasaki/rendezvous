@@ -18,13 +18,32 @@ async function getManagementDocRef(handle: string) {
   if (!user) throw new Error('Not authenticated');
   const q = query(
     collection(db, 'rendezvousPoints'), 
-    where('ownerUid', '==', user.uid), 
     where('managementHandle', '==', handle), 
     limit(1)
   );
   const snap = await getDocs(q);
   if (snap.empty) throw new Error('Not found or no permission');
-  return snap.docs[0];
+  
+  const docSnap = snap.docs[0];
+  const data = docSnap.data();
+  if (data.ownerUid === user.uid) {
+    return docSnap;
+  }
+  
+  // If not the owner, check if the user is a system admin
+  try {
+    const adminSnap = await getDoc(doc(db, 'system', 'admins'));
+    if (adminSnap.exists()) {
+      const uids = adminSnap.data()?.uids || [];
+      if (uids.includes(user.uid)) {
+        return docSnap;
+      }
+    }
+  } catch (e) {
+    console.error('Error verifying admin permissions:', e);
+  }
+  
+  throw new Error('Not found or no permission');
 }
 
 export const api = {
