@@ -1,7 +1,8 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { db, auth } from '../firebase';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
-import { Shield, Trash2, UserPlus, ArrowLeft, AlertCircle, CheckCircle, Loader } from 'lucide-react';
+import { Shield, Trash2, UserPlus, ArrowLeft, AlertCircle, CheckCircle, Loader, Copy, Check, ExternalLink } from 'lucide-react';
+import { api } from '../lib/api';
 
 export function AdminView() {
   const [adminUids, setAdminUids] = useState<string[]>([]);
@@ -12,7 +13,42 @@ export function AdminView() {
   const [success, setSuccess] = useState<string | null>(null);
   const [confirmDeleteUid, setConfirmDeleteUid] = useState<string | null>(null);
 
+  const [unclaimedItems, setUnclaimedItems] = useState<any[]>([]);
+  const [loadingUnclaimed, setLoadingUnclaimed] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
   const currentUser = auth.currentUser;
+
+  // Double check that current user is an admin or takashi316@gmail.com
+  const isUserAdmin = currentUser && (
+    currentUser.email === 'takashi316@gmail.com' || adminUids.includes(currentUser.uid)
+  );
+
+  const loadUnclaimed = async () => {
+    if (!isUserAdmin) return;
+    try {
+      setLoadingUnclaimed(true);
+      const res = await api.getUnclaimedRendezvous();
+      const items = res.items || [];
+      // Sort by createdAt descending
+      items.sort((a: any, b: any) => {
+        const tA = a.createdAt?.seconds || 0;
+        const tB = b.createdAt?.seconds || 0;
+        return tB - tA;
+      });
+      setUnclaimedItems(items);
+    } catch (err) {
+      console.error("Error loading unclaimed rendezvous points:", err);
+    } finally {
+      setLoadingUnclaimed(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isUserAdmin) {
+      loadUnclaimed();
+    }
+  }, [isUserAdmin]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -106,11 +142,6 @@ export function AdminView() {
       </div>
     );
   }
-
-  // Double check that current user is an admin or takashi316@gmail.com
-  const isUserAdmin = currentUser && (
-    currentUser.email === 'takashi316@gmail.com' || adminUids.includes(currentUser.uid)
-  );
 
   if (!isUserAdmin) {
     return (
@@ -314,6 +345,105 @@ export function AdminView() {
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Unclaimed Rendezvous Points Section */}
+        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <span>オーナー未割り当てのランデブーポイント一覧</span>
+                <span className="text-xs bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded-full">
+                  {unclaimedItems.length}
+                </span>
+              </h2>
+              <p className="text-xs text-gray-500 mt-1">
+                作成されたものの、まだユーザーによって紐付け（Claim）されていないランデブーポイントの一覧です。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadUnclaimed}
+              disabled={loadingUnclaimed}
+              className="inline-flex items-center gap-1.5 bg-gray-50 hover:bg-gray-100 text-gray-700 hover:text-black text-xs font-semibold px-3 py-2 border border-gray-200 rounded-lg transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              {loadingUnclaimed ? '更新中...' : '一覧を更新'}
+            </button>
+          </div>
+
+          {loadingUnclaimed ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
+              <Loader className="animate-spin text-amber-500" size={24} />
+              <p className="text-xs">未割り当てのランデブーポイントを取得中...</p>
+            </div>
+          ) : unclaimedItems.length === 0 ? (
+            <div className="text-center py-12 border border-dashed border-gray-100 rounded-lg bg-gray-50/50">
+              <p className="text-sm text-gray-400">現在、未割り当てのランデブーポイントはありません。</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-100 text-gray-400 text-xs font-semibold uppercase tracking-wider">
+                    <th className="pb-3 pl-2">ランデブーID</th>
+                    <th className="pb-3 hidden sm:table-cell">作成日時</th>
+                    <th className="pb-3 hidden md:table-cell">有効期限 (TTL)</th>
+                    <th className="pb-3 text-right pr-2">アクション</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {unclaimedItems.map((item) => {
+                    const createdAtDate = item.createdAt?.toDate ? item.createdAt.toDate() : item.createdAt ? new Date(item.createdAt) : null;
+                    const ttlDeleteAtDate = item.ttlDeleteAt?.toDate ? item.ttlDeleteAt.toDate() : item.ttlDeleteAt ? new Date(item.ttlDeleteAt) : null;
+                    const publicUrl = `${window.location.origin}/r/${item.id}`;
+
+                    return (
+                      <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
+                        <td className="py-3.5 pl-2 font-mono font-medium text-xs text-gray-900 select-all max-w-[150px] sm:max-w-none truncate">
+                          {item.id}
+                        </td>
+                        <td className="py-3.5 text-xs text-gray-500 hidden sm:table-cell">
+                          {createdAtDate ? createdAtDate.toLocaleString('ja-JP') : '不明'}
+                        </td>
+                        <td className="py-3.5 text-xs text-gray-500 hidden md:table-cell">
+                          {ttlDeleteAtDate ? ttlDeleteAtDate.toLocaleString('ja-JP') : '期限なし'}
+                        </td>
+                        <td className="py-3.5 text-right pr-2">
+                          <div className="inline-flex items-center gap-1.5 justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(item.id);
+                                setCopiedId(item.id);
+                                setTimeout(() => setCopiedId(null), 2000);
+                              }}
+                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-black transition-colors cursor-pointer"
+                              title="IDをコピー"
+                            >
+                              {copiedId === item.id ? (
+                                <Check size={14} className="text-emerald-600" />
+                              ) : (
+                                <Copy size={14} />
+                              )}
+                            </button>
+                            <a
+                              href={publicUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-black transition-colors"
+                              title="パブリックURLを開く"
+                            >
+                              <ExternalLink size={14} />
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

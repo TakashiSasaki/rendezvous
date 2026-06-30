@@ -120,6 +120,18 @@ export const api = {
     return { items };
   },
   
+  getUnclaimedRendezvous: async () => {
+    const user = auth.currentUser;
+    if (!user) return { items: [] };
+    const q = query(
+      collection(db, 'rendezvousPoints'), 
+      where('state', '==', 'UNCLAIMED')
+    );
+    const snap = await getDocs(q);
+    const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return { items };
+  },
+  
   rotateManagementUrl: async (handle: string) => {
     const docSnap = await getManagementDocRef(handle);
     const newHandle = 'mgmt_' + crypto.randomUUID().replace(/-/g, '');
