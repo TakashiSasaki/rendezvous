@@ -66,6 +66,17 @@
         }
       },
       "required": ["uids"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Stores user preferences and settings.",
+      "type": "object",
+      "properties": {
+        "adminPanels": {
+          "type": "object",
+          "description": "State of admin view panels, e.g. open or closed"
+        }
+      }
     }
   },
   "firestore": {
@@ -76,6 +87,10 @@
     "/system/admins": {
       "schema": "SystemAdmins",
       "description": "Stores system configuration, specifically lists of administrator UIDs"
+    },
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User-specific settings and preferences"
     }
   }
 }

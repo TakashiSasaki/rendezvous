@@ -1,8 +1,9 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { db, auth } from '../firebase';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
-import { Shield, Trash2, UserPlus, ArrowLeft, AlertCircle, CheckCircle, Loader, Copy, Check, ExternalLink } from 'lucide-react';
+import { Shield, Trash2, UserPlus, ArrowLeft, AlertCircle, CheckCircle, Loader, Copy, Check, ExternalLink, ChevronDown } from 'lucide-react';
 import { api } from '../lib/api';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function AdminView() {
   const [adminUids, setAdminUids] = useState<string[]>([]);
@@ -18,6 +19,60 @@ export function AdminView() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const currentUser = auth.currentUser;
+
+  const [listOpen, setListOpen] = useState(true);
+  const [addOpen, setAddOpen] = useState(true);
+  const [unclaimedOpen, setUnclaimedOpen] = useState(true);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Load panel states from Firestore
+    const userDocRef = doc(db, 'users', currentUser.uid);
+    getDoc(userDocRef).then((docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const panels = data.adminPanels || {};
+        if (panels.listOpen !== undefined) setListOpen(panels.listOpen);
+        if (panels.addOpen !== undefined) setAddOpen(panels.addOpen);
+        if (panels.unclaimedOpen !== undefined) setUnclaimedOpen(panels.unclaimedOpen);
+      }
+    }).catch(err => {
+      console.error("Error loading panel preferences from Firestore:", err);
+    });
+  }, [currentUser]);
+
+  const savePanelState = async (panelKey: string, isOpen: boolean) => {
+    if (!currentUser) return;
+    try {
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      await setDoc(userDocRef, {
+        adminPanels: {
+          [panelKey]: isOpen
+        }
+      }, { merge: true });
+    } catch (err) {
+      console.error("Error saving panel state to Firestore:", err);
+    }
+  };
+
+  const toggleList = () => {
+    const next = !listOpen;
+    setListOpen(next);
+    savePanelState('listOpen', next);
+  };
+
+  const toggleAdd = () => {
+    const next = !addOpen;
+    setAddOpen(next);
+    savePanelState('addOpen', next);
+  };
+
+  const toggleUnclaimed = () => {
+    const next = !unclaimedOpen;
+    setUnclaimedOpen(next);
+    savePanelState('unclaimedOpen', next);
+  };
 
   // Double check that current user is an admin or takashi316@gmail.com
   const isUserAdmin = currentUser && (
@@ -215,235 +270,308 @@ export function AdminView() {
 
         <div className="grid grid-cols-1 md:grid-cols-5 gap-8">
           {/* Admin List Card (Left/Main column) */}
-          <div className="md:col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <span>管理者UID一覧</span>
-              <span className="text-xs bg-gray-100 text-gray-600 font-normal px-2 py-0.5 rounded-full">
-                {adminUids.length}
-              </span>
-            </h2>
+          <div className="md:col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden self-start">
+            <button
+              type="button"
+              onClick={toggleList}
+              className="w-full flex items-center justify-between p-6 text-left hover:bg-gray-50/50 transition-colors focus:outline-none cursor-pointer"
+            >
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <span>管理者UID一覧</span>
+                <span className="text-xs bg-gray-100 text-gray-600 font-normal px-2 py-0.5 rounded-full">
+                  {adminUids.length}
+                </span>
+              </h2>
+              <ChevronDown 
+                className={`text-gray-400 transition-transform duration-200 ${listOpen ? 'rotate-180' : ''}`} 
+                size={20} 
+              />
+            </button>
 
-            {adminUids.length === 0 ? (
-              <p className="text-sm text-gray-400 py-6 text-center">登録されている管理者はありません。</p>
-            ) : (
-              <div className="space-y-3">
-                {adminUids.map((uid) => {
-                  const isSelf = currentUser?.uid === uid;
-                  return (
-                    <div 
-                      key={uid} 
-                      className={`p-3 rounded-lg border flex items-center justify-between gap-3 transition-colors ${
-                        isSelf 
-                          ? 'border-amber-200 bg-amber-50/30' 
-                          : 'border-gray-100 bg-white hover:border-gray-200'
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className="font-mono text-sm text-gray-800 font-medium select-all block truncate" title={uid}>
-                            {uid}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {isSelf && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
-                              あなた
-                            </span>
-                          )}
-                          {uid === "takashi316@gmail.com" ? (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800">
-                              プライマリ
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
+            <AnimatePresence initial={false}>
+              {listOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-6 pt-0 border-t border-gray-50">
+                    {adminUids.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-6 text-center">登録されている管理者はありません。</p>
+                    ) : (
+                      <div className="space-y-3 pt-4">
+                        {adminUids.map((uid) => {
+                          const isSelf = currentUser?.uid === uid;
+                          return (
+                            <div 
+                              key={uid} 
+                              className={`p-3 rounded-lg border flex items-center justify-between gap-3 transition-colors ${
+                                isSelf 
+                                  ? 'border-amber-200 bg-amber-50/30' 
+                                  : 'border-gray-100 bg-white hover:border-gray-200'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span className="font-mono text-sm text-gray-800 font-medium select-all block truncate" title={uid}>
+                                    {uid}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {isSelf && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                                      あなた
+                                    </span>
+                                  )}
+                                  {uid === "takashi316@gmail.com" ? (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800">
+                                      プライマリ
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
 
-                      {/* Delete button or confirmation */}
-                      <div className="shrink-0">
-                        {confirmDeleteUid === uid ? (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => handleRemoveAdmin(uid)}
-                              disabled={submitting}
-                              className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-2.5 py-1.5 rounded transition-colors"
-                            >
-                              削除
-                            </button>
-                            <button
-                              onClick={() => setConfirmDeleteUid(null)}
-                              className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium px-2.5 py-1.5 rounded transition-colors"
-                            >
-                              戻る
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              if (isSelf) {
-                                setError("自分自身を管理者から削除することはできません。");
-                              } else {
-                                setConfirmDeleteUid(uid);
-                              }
-                            }}
-                            disabled={isSelf || submitting}
-                            className={`p-2 rounded-md transition-all ${
-                              isSelf 
-                                ? 'text-gray-300 cursor-not-allowed' 
-                                : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
-                            }`}
-                            title={isSelf ? "自分自身を削除することはできません" : "管理者を削除"}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
+                              {/* Delete button or confirmation */}
+                              <div className="shrink-0">
+                                {confirmDeleteUid === uid ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => handleRemoveAdmin(uid)}
+                                      disabled={submitting}
+                                      className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-2.5 py-1.5 rounded transition-colors"
+                                    >
+                                      削除
+                                    </button>
+                                    <button
+                                      onClick={() => setConfirmDeleteUid(null)}
+                                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium px-2.5 py-1.5 rounded transition-colors"
+                                    >
+                                      戻る
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      if (isSelf) {
+                                        setError("自分自身を管理者から削除することはできません。");
+                                      } else {
+                                        setConfirmDeleteUid(uid);
+                                      }
+                                    }}
+                                    disabled={isSelf || submitting}
+                                    className={`p-2 rounded-md transition-all ${
+                                      isSelf 
+                                        ? 'text-gray-300 cursor-not-allowed' 
+                                        : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+                                    }`}
+                                    title={isSelf ? "自分自身を削除することはできません" : "管理者を削除"}
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Add Admin Form Card (Right column) */}
-          <div className="md:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-6 self-start">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <UserPlus size={18} className="text-amber-500" />
-              <span>管理者の新規追加</span>
-            </h2>
+          <div className="md:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden self-start">
+            <button
+              type="button"
+              onClick={toggleAdd}
+              className="w-full flex items-center justify-between p-6 text-left hover:bg-gray-50/50 transition-colors focus:outline-none cursor-pointer"
+            >
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <UserPlus size={18} className="text-amber-500" />
+                <span>管理者の新規追加</span>
+              </h2>
+              <ChevronDown 
+                className={`text-gray-400 transition-transform duration-200 ${addOpen ? 'rotate-180' : ''}`} 
+                size={20} 
+              />
+            </button>
 
-            <form onSubmit={handleAddAdmin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                  追加するユーザーの UID
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newUid}
-                  onChange={(e) => {
-                    setNewUid(e.target.value);
-                    if (error) setError(null);
-                  }}
-                  placeholder="例: aBcD1234eFgH5678iJkL..."
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 font-mono focus:border-amber-400 focus:outline-none transition-colors"
-                />
-              </div>
+            <AnimatePresence initial={false}>
+              {addOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-6 pt-0 border-t border-gray-50">
+                    <form onSubmit={handleAddAdmin} className="space-y-4 pt-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                          追加するユーザーの UID
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={newUid}
+                          onChange={(e) => {
+                            setNewUid(e.target.value);
+                            if (error) setError(null);
+                          }}
+                          placeholder="例: aBcD1234eFgH5678iJkL..."
+                          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 font-mono focus:border-amber-400 focus:outline-none transition-colors"
+                        />
+                      </div>
 
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-black hover:bg-gray-800 text-white font-medium text-sm py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {submitting ? '追加中...' : '管理者として追加'}
-              </button>
-            </form>
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        className="w-full bg-black hover:bg-gray-800 text-white font-medium text-sm py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                      >
+                        {submitting ? '追加中...' : '管理者として追加'}
+                      </button>
+                    </form>
 
-            <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-              <h4 className="text-xs font-semibold text-gray-700 mb-1">UIDの確認方法</h4>
-              <p className="text-[11px] text-gray-500 leading-relaxed">
-                管理者に設定したいユーザーは、ログインした状態でページの右上に表示される自分のUIDをコピーできます。そのUIDをここに入力して追加してください。
-              </p>
-            </div>
+                    <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                      <h4 className="text-xs font-semibold text-gray-700 mb-1">UIDの確認方法</h4>
+                      <p className="text-[11px] text-gray-500 leading-relaxed">
+                        管理者に設定したいユーザーは、ログインした状態ページの右上に表示される自分のUIDをコピーできます。そのUIDをここに入力して追加してください。
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
         {/* Unclaimed Rendezvous Points Section */}
-        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <span>オーナー未割り当てのランデブーポイント一覧</span>
-                <span className="text-xs bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded-full">
-                  {unclaimedItems.length}
-                </span>
-              </h2>
-              <p className="text-xs text-gray-500 mt-1">
-                作成されたものの、まだユーザーによって紐付け（Claim）されていないランデブーポイントの一覧です。
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={loadUnclaimed}
-              disabled={loadingUnclaimed}
-              className="inline-flex items-center gap-1.5 bg-gray-50 hover:bg-gray-100 text-gray-700 hover:text-black text-xs font-semibold px-3 py-2 border border-gray-200 rounded-lg transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-            >
-              {loadingUnclaimed ? '更新中...' : '一覧を更新'}
-            </button>
-          </div>
+        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <button
+            type="button"
+            onClick={toggleUnclaimed}
+            className="w-full flex items-center justify-between p-6 text-left hover:bg-gray-50/50 transition-colors focus:outline-none cursor-pointer"
+          >
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <span>オーナー未割り当てのランデブーポイント一覧</span>
+              <span className="text-xs bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded-full">
+                {unclaimedItems.length}
+              </span>
+            </h2>
+            <ChevronDown 
+              className={`text-gray-400 transition-transform duration-200 ${unclaimedOpen ? 'rotate-180' : ''}`} 
+              size={20} 
+            />
+          </button>
 
-          {loadingUnclaimed ? (
-            <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
-              <Loader className="animate-spin text-amber-500" size={24} />
-              <p className="text-xs">未割り当てのランデブーポイントを取得中...</p>
-            </div>
-          ) : unclaimedItems.length === 0 ? (
-            <div className="text-center py-12 border border-dashed border-gray-100 rounded-lg bg-gray-50/50">
-              <p className="text-sm text-gray-400">現在、未割り当てのランデブーポイントはありません。</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-gray-100 text-gray-400 text-xs font-semibold uppercase tracking-wider">
-                    <th className="pb-3 pl-2">ランデブーID</th>
-                    <th className="pb-3 hidden sm:table-cell">作成日時</th>
-                    <th className="pb-3 hidden md:table-cell">有効期限 (TTL)</th>
-                    <th className="pb-3 text-right pr-2">アクション</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {unclaimedItems.map((item) => {
-                    const createdAtDate = item.createdAt?.toDate ? item.createdAt.toDate() : item.createdAt ? new Date(item.createdAt) : null;
-                    const ttlDeleteAtDate = item.ttlDeleteAt?.toDate ? item.ttlDeleteAt.toDate() : item.ttlDeleteAt ? new Date(item.ttlDeleteAt) : null;
-                    const publicUrl = `${window.location.origin}/r/${item.id}`;
+          <AnimatePresence initial={false}>
+            {unclaimedOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: 'easeInOut' }}
+                className="overflow-hidden"
+              >
+                <div className="p-6 pt-0 border-t border-gray-50">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 border-b border-gray-50 mb-4">
+                    <div>
+                      <p className="text-xs text-gray-500">
+                        作成されたものの、まだユーザーによって紐付け（Claim）されていないランデブーポイントの一覧です。
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={loadUnclaimed}
+                      disabled={loadingUnclaimed}
+                      className="inline-flex items-center gap-1.5 bg-gray-50 hover:bg-gray-100 text-gray-700 hover:text-black text-xs font-semibold px-3 py-2 border border-gray-200 rounded-lg transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                    >
+                      {loadingUnclaimed ? '更新中...' : '一覧を更新'}
+                    </button>
+                  </div>
 
-                    return (
-                      <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
-                        <td className="py-3.5 pl-2 font-mono font-medium text-xs text-gray-900 select-all max-w-[150px] sm:max-w-none truncate">
-                          {item.id}
-                        </td>
-                        <td className="py-3.5 text-xs text-gray-500 hidden sm:table-cell">
-                          {createdAtDate ? createdAtDate.toLocaleString('ja-JP') : '不明'}
-                        </td>
-                        <td className="py-3.5 text-xs text-gray-500 hidden md:table-cell">
-                          {ttlDeleteAtDate ? ttlDeleteAtDate.toLocaleString('ja-JP') : '期限なし'}
-                        </td>
-                        <td className="py-3.5 text-right pr-2">
-                          <div className="inline-flex items-center gap-1.5 justify-end">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(item.id);
-                                setCopiedId(item.id);
-                                setTimeout(() => setCopiedId(null), 2000);
-                              }}
-                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-black transition-colors cursor-pointer"
-                              title="IDをコピー"
-                            >
-                              {copiedId === item.id ? (
-                                <Check size={14} className="text-emerald-600" />
-                              ) : (
-                                <Copy size={14} />
-                              )}
-                            </button>
-                            <a
-                              href={publicUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-black transition-colors"
-                              title="パブリックURLを開く"
-                            >
-                              <ExternalLink size={14} />
-                            </a>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  {loadingUnclaimed ? (
+                    <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
+                      <Loader className="animate-spin text-amber-500" size={24} />
+                      <p className="text-xs">未割り当てのランデブーポイントを取得中...</p>
+                    </div>
+                  ) : unclaimedItems.length === 0 ? (
+                    <div className="text-center py-12 border border-dashed border-gray-100 rounded-lg bg-gray-50/50">
+                      <p className="text-sm text-gray-400">現在、未割り当てのランデブーポイントはありません。</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-gray-100 text-gray-400 text-xs font-semibold uppercase tracking-wider">
+                            <th className="pb-3 pl-2">ランデブーID</th>
+                            <th className="pb-3 hidden sm:table-cell">作成日時</th>
+                            <th className="pb-3 hidden md:table-cell">有効期限 (TTL)</th>
+                            <th className="pb-3 text-right pr-2">アクション</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {unclaimedItems.map((item) => {
+                            const createdAtDate = item.createdAt?.toDate ? item.createdAt.toDate() : item.createdAt ? new Date(item.createdAt) : null;
+                            const ttlDeleteAtDate = item.ttlDeleteAt?.toDate ? item.ttlDeleteAt.toDate() : item.ttlDeleteAt ? new Date(item.ttlDeleteAt) : null;
+                            const publicUrl = `${window.location.origin}/r/${item.id}`;
+
+                            return (
+                              <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
+                                <td className="py-3.5 pl-2 font-mono font-medium text-xs text-gray-900 select-all max-w-[150px] sm:max-w-none truncate">
+                                  {item.id}
+                                </td>
+                                <td className="py-3.5 text-xs text-gray-500 hidden sm:table-cell">
+                                  {createdAtDate ? createdAtDate.toLocaleString('ja-JP') : '不明'}
+                                </td>
+                                <td className="py-3.5 text-xs text-gray-500 hidden md:table-cell">
+                                  {ttlDeleteAtDate ? ttlDeleteAtDate.toLocaleString('ja-JP') : '期限なし'}
+                                </td>
+                                <td className="py-3.5 text-right pr-2">
+                                  <div className="inline-flex items-center gap-1.5 justify-end">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(item.id);
+                                        setCopiedId(item.id);
+                                        setTimeout(() => setCopiedId(null), 2000);
+                                      }}
+                                      className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-black transition-colors cursor-pointer"
+                                      title="IDをコピー"
+                                    >
+                                      {copiedId === item.id ? (
+                                        <Check size={14} className="text-emerald-600" />
+                                      ) : (
+                                        <Copy size={14} />
+                                      )}
+                                    </button>
+                                    <a
+                                      href={publicUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-black transition-colors"
+                                      title="パブリックURLを開く"
+                                    >
+                                      <ExternalLink size={14} />
+                                    </a>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

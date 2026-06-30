@@ -19,6 +19,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && (request.auth.token.email == 'takashi316@gmail.com' || isAdmin());
     }
+
+    match /users/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
     
     match /rendezvousPoints/{id} {
       allow read: if true;
