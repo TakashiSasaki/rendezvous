@@ -1,4 +1,4 @@
-import { auth, db } from '../firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { 
   collection, doc, getDoc, setDoc, updateDoc, deleteDoc, 
   query, where, getDocs, addDoc, runTransaction, 
@@ -16,12 +16,18 @@ async function getEmailHash(email: string) {
 async function getManagementDocRef(handle: string) {
   const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
+  
+  let snap;
   const q = query(
     collection(db, 'rendezvousPoints'), 
     where('managementHandle', '==', handle), 
     limit(1)
   );
-  const snap = await getDocs(q);
+  try {
+    snap = await getDocs(q);
+  } catch (e) {
+    handleFirestoreError(e, OperationType.GET, 'rendezvousPoints');
+  }
   if (snap.empty) throw new Error('Not found or no permission');
   
   const docSnap = snap.docs[0];
@@ -41,6 +47,9 @@ async function getManagementDocRef(handle: string) {
     }
   } catch (e) {
     console.error('Error verifying admin permissions:', e);
+    if (e instanceof Error && e.message.includes('permission')) {
+      handleFirestoreError(e, OperationType.GET, 'system/admins');
+    }
   }
   
   throw new Error('Not found or no permission');
@@ -49,52 +58,65 @@ async function getManagementDocRef(handle: string) {
 export const api = {
   createRendezvous: async () => {
     const ttlDeleteAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    const docRef = await addDoc(collection(db, 'rendezvousPoints'), {
-      state: 'UNCLAIMED',
-      createdAt: serverTimestamp(),
-      ttlDeleteAt,
-      ownerEmailHash: null,
-      ownerUid: null,
-      managementHandle: null,
-      managementIndex: 0,
-      publicJson: null,
-      publicJsonUpdatedAt: null,
-      redirect: null
-    });
-    return {
-      rendezvousId: docRef.id,
-      rendezvousUrl: `${window.location.origin}/r/${docRef.id}`
-    };
+    try {
+      const docRef = await addDoc(collection(db, 'rendezvousPoints'), {
+        state: 'UNCLAIMED',
+        createdAt: serverTimestamp(),
+        ttlDeleteAt,
+        ownerEmailHash: null,
+        ownerUid: null,
+        managementHandle: null,
+        managementIndex: 0,
+        publicJson: null,
+        publicJsonUpdatedAt: null,
+        redirect: null
+      });
+      return {
+        rendezvousId: docRef.id,
+        rendezvousUrl: `${window.location.origin}/r/${docRef.id}`
+      };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'rendezvousPoints');
+    }
   },
   
   claimRendezvous: async (id: string) => {
     const user = auth.currentUser;
     if (!user) throw new Error('Not authenticated');
     
-    return await runTransaction(db, async (t) => {
-      const ref = doc(db, 'rendezvousPoints', id);
-      const docSnap = await t.get(ref);
-      if (!docSnap.exists()) throw new Error('Not found');
-      const data = docSnap.data();
-      if (data.state !== 'UNCLAIMED') throw new Error('Already claimed');
-      
-      const newHandle = 'mgmt_' + crypto.randomUUID().replace(/-/g, '');
-      t.update(ref, {
-        state: 'ACTIVE',
-        ownerEmailHash: await getEmailHash(user.email!),
-        ownerUid: user.uid,
-        managementHandle: newHandle,
-        managementIndex: 1,
-        claimedAt: serverTimestamp(),
-        ttlDeleteAt: deleteField()
+    try {
+      return await runTransaction(db, async (t) => {
+        const ref = doc(db, 'rendezvousPoints', id);
+        const docSnap = await t.get(ref);
+        if (!docSnap.exists()) throw new Error('Not found');
+        const data = docSnap.data();
+        if (data.state !== 'UNCLAIMED') throw new Error('Already claimed');
+        
+        const newHandle = 'mgmt_' + crypto.randomUUID().replace(/-/g, '');
+        t.update(ref, {
+          state: 'ACTIVE',
+          ownerEmailHash: await getEmailHash(user.email!),
+          ownerUid: user.uid,
+          managementHandle: newHandle,
+          managementIndex: 1,
+          claimedAt: serverTimestamp(),
+          ttlDeleteAt: deleteField()
+        });
+        return { managementUrl: `${window.location.origin}/m/${newHandle}` };
       });
-      return { managementUrl: `${window.location.origin}/m/${newHandle}` };
-    });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `rendezvousPoints/${id}`);
+    }
   },
   
   getRendezvousPublic: async (id: string) => {
     const ref = doc(db, 'rendezvousPoints', id);
-    const snap = await getDoc(ref);
+    let snap;
+    try {
+      snap = await getDoc(ref);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.GET, `rendezvousPoints/${id}`);
+    }
     if (!snap.exists()) throw new Error('Not found');
     const data = snap.data();
     
@@ -115,9 +137,13 @@ export const api = {
     const user = auth.currentUser;
     if (!user) return { items: [] };
     const q = query(collection(db, 'rendezvousPoints'), where('ownerUid', '==', user.uid));
-    const snap = await getDocs(q);
-    const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    return { items };
+    try {
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      return { items };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.LIST, 'rendezvousPoints');
+    }
   },
   
   getUnclaimedRendezvous: async () => {
@@ -127,19 +153,27 @@ export const api = {
       collection(db, 'rendezvousPoints'), 
       where('state', '==', 'UNCLAIMED')
     );
-    const snap = await getDocs(q);
-    const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    return { items };
+    try {
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      return { items };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.LIST, 'rendezvousPoints');
+    }
   },
   
   rotateManagementUrl: async (handle: string) => {
     const docSnap = await getManagementDocRef(handle);
     const newHandle = 'mgmt_' + crypto.randomUUID().replace(/-/g, '');
-    await updateDoc(docSnap.ref, {
-      managementHandle: newHandle,
-      managementIndex: (docSnap.data().managementIndex || 1) + 1
-    });
-    return { newManagementUrl: `${window.location.origin}/m/${newHandle}` };
+    try {
+      await updateDoc(docSnap.ref, {
+        managementHandle: newHandle,
+        managementIndex: (docSnap.data().managementIndex || 1) + 1
+      });
+      return { newManagementUrl: `${window.location.origin}/m/${newHandle}` };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `rendezvousPoints/${docSnap.id}`);
+    }
   },
   
   getManagementData: async (handle: string) => {
@@ -149,61 +183,88 @@ export const api = {
   
   updateRedirect: async (handle: string, url: string, statusCode: number) => {
     const docSnap = await getManagementDocRef(handle);
-    await updateDoc(docSnap.ref, {
-      redirect: { url, statusCode }
-    });
-    return { success: true };
+    try {
+      await updateDoc(docSnap.ref, {
+        redirect: { url, statusCode }
+      });
+      return { success: true };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `rendezvousPoints/${docSnap.id}`);
+    }
   },
   
   deleteRedirect: async (handle: string) => {
     const docSnap = await getManagementDocRef(handle);
-    await updateDoc(docSnap.ref, {
-      redirect: deleteField()
-    });
-    return { success: true };
+    try {
+      await updateDoc(docSnap.ref, {
+        redirect: deleteField()
+      });
+      return { success: true };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `rendezvousPoints/${docSnap.id}`);
+    }
   },
   
   updateJson: async (handle: string, publicJson: any) => {
     const docSnap = await getManagementDocRef(handle);
-    await updateDoc(docSnap.ref, {
-      publicJson
-    });
-    return { success: true };
+    try {
+      await updateDoc(docSnap.ref, {
+        publicJson
+      });
+      return { success: true };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `rendezvousPoints/${docSnap.id}`);
+    }
   },
   
   deleteJson: async (handle: string) => {
     const docSnap = await getManagementDocRef(handle);
-    await updateDoc(docSnap.ref, {
-      publicJson: deleteField()
-    });
-    return { success: true };
+    try {
+      await updateDoc(docSnap.ref, {
+        publicJson: deleteField()
+      });
+      return { success: true };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `rendezvousPoints/${docSnap.id}`);
+    }
   },
   
   releaseOwner: async (handle: string) => {
     const docSnap = await getManagementDocRef(handle);
-    await updateDoc(docSnap.ref, {
-      state: 'UNCLAIMED',
-      ownerUid: deleteField(),
-      ownerEmailHash: deleteField(),
-      managementHandle: deleteField(),
-      managementIndex: deleteField(),
-      redirect: deleteField(),
-      publicJson: deleteField(),
-      ttlDeleteAt: serverTimestamp() // just as a cleanup marker
-    });
-    return { success: true };
+    try {
+      await updateDoc(docSnap.ref, {
+        state: 'UNCLAIMED',
+        ownerUid: deleteField(),
+        ownerEmailHash: deleteField(),
+        managementHandle: deleteField(),
+        managementIndex: deleteField(),
+        redirect: deleteField(),
+        publicJson: deleteField(),
+        ttlDeleteAt: serverTimestamp() // just as a cleanup marker
+      });
+      return { success: true };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `rendezvousPoints/${docSnap.id}`);
+    }
   },
   
   disable: async (handle: string) => {
     const docSnap = await getManagementDocRef(handle);
-    await updateDoc(docSnap.ref, { state: 'DISABLED' });
-    return { success: true };
+    try {
+      await updateDoc(docSnap.ref, { state: 'DISABLED' });
+      return { success: true };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `rendezvousPoints/${docSnap.id}`);
+    }
   },
   
   enable: async (handle: string) => {
     const docSnap = await getManagementDocRef(handle);
-    await updateDoc(docSnap.ref, { state: 'ACTIVE' });
-    return { success: true };
+    try {
+      await updateDoc(docSnap.ref, { state: 'ACTIVE' });
+      return { success: true };
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `rendezvousPoints/${docSnap.id}`);
+    }
   }
 };
-

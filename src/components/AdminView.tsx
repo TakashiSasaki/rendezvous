@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react';
-import { db, auth } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { Shield, Trash2, UserPlus, ArrowLeft, AlertCircle, CheckCircle, Loader, Copy, Check, ExternalLink, ChevronDown } from 'lucide-react';
 import { api } from '../lib/api';
@@ -39,6 +39,7 @@ export function AdminView() {
       }
     }).catch(err => {
       console.error("Error loading panel preferences from Firestore:", err);
+      handleFirestoreError(err, OperationType.GET, `users/${currentUser.uid}`);
     });
   }, [currentUser]);
 
@@ -53,6 +54,7 @@ export function AdminView() {
       }, { merge: true });
     } catch (err) {
       console.error("Error saving panel state to Firestore:", err);
+      handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
     }
   };
 
@@ -123,6 +125,7 @@ export function AdminView() {
       console.error("Error listening to admin rules:", err);
       setError("管理者情報の読み込みに失敗しました。権限がない可能性があります。");
       setLoading(false);
+      handleFirestoreError(err, OperationType.GET, 'system/admins');
     });
 
     return unsub;
@@ -156,6 +159,7 @@ export function AdminView() {
     } catch (err: any) {
       console.error("Error adding admin:", err);
       setError(`管理者の追加に失敗しました: ${err.message || "権限エラー"}`);
+      handleFirestoreError(err, OperationType.WRITE, 'system/admins');
     } finally {
       setSubmitting(false);
     }
@@ -182,6 +186,7 @@ export function AdminView() {
     } catch (err: any) {
       console.error("Error removing admin:", err);
       setError(`管理者の削除に失敗しました: ${err.message || "権限エラー"}`);
+      handleFirestoreError(err, OperationType.WRITE, 'system/admins');
     } finally {
       setSubmitting(false);
     }

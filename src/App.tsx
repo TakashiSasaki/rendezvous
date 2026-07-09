@@ -8,7 +8,7 @@ import { IndexView } from './components/IndexView';
 import { RendezvousView } from './components/RendezvousView';
 import { ManagementView } from './components/ManagementView';
 import { AdminView } from './components/AdminView';
-import { auth, db } from './firebase';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { User, signOut } from 'firebase/auth';
 import { User as UserIcon, LogOut, Shield } from 'lucide-react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -29,15 +29,24 @@ export default function App() {
           setIsAdmin(true);
           try {
             const adminDocRef = doc(db, 'system', 'admins');
-            const docSnap = await getDoc(adminDocRef);
+            let docSnap;
+            try {
+              docSnap = await getDoc(adminDocRef);
+            } catch (e) {
+              handleFirestoreError(e, OperationType.GET, 'system/admins');
+            }
             let currentUids: string[] = [];
             if (docSnap.exists()) {
               currentUids = docSnap.data()?.uids || [];
             }
             if (!currentUids.includes(u.uid)) {
               currentUids.push(u.uid);
-              await setDoc(adminDocRef, { uids: currentUids }, { merge: true });
-              console.log("Successfully registered admin UID on client!");
+              try {
+                await setDoc(adminDocRef, { uids: currentUids }, { merge: true });
+                console.log("Successfully registered admin UID on client!");
+              } catch (e) {
+                handleFirestoreError(e, OperationType.WRITE, 'system/admins');
+              }
             }
           } catch (e) {
             console.error("Failed to auto-register admin on client:", e);
@@ -54,6 +63,7 @@ export default function App() {
             }
           } catch (e) {
             console.error("Error checking admin status:", e);
+            handleFirestoreError(e, OperationType.GET, 'system/admins');
           }
         }
       }
@@ -88,7 +98,12 @@ export default function App() {
   return (
     <div className="flex flex-col min-h-screen">
       <div className="bg-white p-3 text-sm flex items-center justify-between border-b border-gray-200 sticky top-0 z-50 shadow-sm">
-        <div className="flex items-center gap-2 min-w-0 mr-4">
+        <div className="flex items-center gap-3 min-w-0 mr-4">
+          <a href="/" className="flex items-center gap-2 shrink-0 group" title="Rendezvous Point">
+            <img src="/icon.svg" alt="Rendezvous Point" className="w-6 h-6 rounded-md group-hover:scale-105 transition-transform" />
+            <span className="font-bold text-gray-900 hidden md:inline tracking-tight">Rendezvous</span>
+          </a>
+          <div className="h-4 w-px bg-gray-300 mx-1 hidden sm:block"></div>
           <span className="text-gray-400 select-none shrink-0 hidden sm:inline">Path:</span>
           <span className="font-mono text-gray-700 break-all whitespace-normal">{path}</span>
         </div>
